@@ -45,24 +45,22 @@ class AppSearchMode(BaseSearchMode):
                 app => {
                     return {
                         id: app.get_id(),
+                        name: app.get_name(),
+                        window_id: app.get_windows()[0].get_id()
                     };
                 }
             )
         ''')
 
-        self.activate_window = lambda app_id: eval_call(f'''
-            Main.activateWindow(
-                Main.Shell.AppSystem.get_default().lookup_app(
-                    {json.dumps(app_id)}
-                ).get_windows()[0]
-            )
+        self.activate_window = lambda window_id: eval_call(f'''
+            let windows = Main.Shell.AppSystem.get_default().get_running().map(app => app.get_windows()[0]);
+            Main.activateWindow(windows.find(window => window.get_id() == {window_id}));
         ''')
 
-    def patch_on_enter(self, result_item):
+    def patch_on_enter(self, result_item, window_id):
         def new_on_enter(query, old_on_enter=result_item.on_enter):
             old_on_enter(query)
-            activate = lambda: self.activate_window(
-                result_item.record['desktop_file_short'])
+            activate = lambda: self.activate_window(window_id)
             return ActivateAppAction(activate)
         return new_on_enter
 
@@ -85,11 +83,13 @@ class AppSearchMode(BaseSearchMode):
 
         status, active_apps = self.get_active_windows()
         if status:
-            active_apps = {app['id'] for app in json.loads(active_apps)}
+            active_apps = json.loads(active_apps)
 
             for r in result_list:
                 if isinstance(r, AppResultItem):
-                    if r.record['desktop_file_short'] in active_apps:
-                        r.on_enter = self.patch_on_enter(r)
+                    window_id = next((app['window_id'] for app in active_apps if r.record['desktop_file_short'].lower() in [app['id'],f"{app['name'].strip()}.desktop"]), None)
+                    if window_id is not None:
+                        r.on_enter = self.patch_on_enter(r, window_id)
 
         return RenderResultListAction(result_list)
+
